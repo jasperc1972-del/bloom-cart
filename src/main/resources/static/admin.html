@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理後台｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <h2 class="page-title">管理後台</h2>
+  <div class="tabs">
+    <button class="chip active" data-tab="products">商品管理</button>
+    <button class="chip" data-tab="orders">訂單管理</button>
+  </div>
+
+  <section id="tab-products">
+    <p><button class="btn small" id="new-product">＋ 新增商品</button>
+      <span class="hint">圖片請放在 static/images/products/{商品代碼}/main.webp、detail_1.webp…，沒放會顯示預設圖</span></p>
+    <div class="table-wrap"><table id="product-table"></table></div>
+  </section>
+
+  <section id="tab-orders" style="display:none">
+    <div class="filters">
+      <label for="status-filter">狀態</label>
+      <select id="status-filter">
+        <option value="">全部</option>
+        <option value="PENDING">待付款</option>
+        <option value="PAID">已付款</option>
+        <option value="DELIVERING">配送中</option>
+        <option value="COMPLETED">已送達</option>
+      </select>
+    </div>
+    <div id="order-list"></div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <form id="pform" method="dialog">
+    <h3 id="dlg-title">商品</h3>
+    <div class="form-grid">
+      <div class="field"><label>商品代碼</label><input name="productCode" required pattern="[A-Z0-9\-]{3,50}" placeholder="FLOWER-ROSE-RED"></div>
+      <div class="field"><label>商品名稱</label><input name="name" required maxlength="100"></div>
+      <div class="field"><label>花種</label><input name="flowerType" required maxlength="50"></div>
+      <div class="field"><label>適用場景 <span class="hint">逗號分隔</span></label><input name="occasions" maxlength="255" placeholder="求婚,情人節"></div>
+      <div class="field"><label>基礎單價</label><input name="basePrice" type="number" min="0" step="0.01" required></div>
+      <div class="field"><label>庫存</label><input name="stock" type="number" min="0" step="1" required></div>
+      <div class="field full"><label>花語</label><textarea name="flowerMeaning"></textarea></div>
+      <div class="field full"><label>照顧注意事項</label><textarea name="careInstructions"></textarea></div>
+      <div class="field"><label>狀態</label>
+        <select name="status"><option value="1">上架</option><option value="0">下架</option></select></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button type="button" class="btn outline" id="dlg-cancel">取消</button>
+      <button type="submit" class="btn" value="save">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/js/common.js"></script>
+<script>
+  const NEXT = { PENDING: ['PAID', '標記已付款'], PAID: ['DELIVERING', '開始配送'], DELIVERING: ['COMPLETED', '標記已送達'] };
+  let products = [];
+  let editingId = null;
+
+  async function init() {
+    const me = await renderLayout('admin');
+    if (!requireLogin(me)) return;
+    if (me.role !== 'ADMIN') {
+      document.querySelector('main').innerHTML = '<div class="empty">需要管理員權限</div>';
+      return;
+    }
+    // 分頁切換
+    document.querySelector('.tabs').onclick = e => {
+      const b = e.target.closest('.chip');
+      if (!b) return;
+      document.querySelectorAll('.tabs .chip').forEach(c => c.classList.toggle('active', c === b));
+      document.getElementById('tab-products').style.display = b.dataset.tab === 'products' ? '' : 'none';
+      document.getElementById('tab-orders').style.display = b.dataset.tab === 'orders' ? '' : 'none';
+      if (b.dataset.tab === 'orders') loadOrders();
+    };
+    document.getElementById('status-filter').onchange = loadOrders;
+    document.getElementById('new-product').onclick = () => openDialog(null);
+    document.getElementById('dlg-cancel').onclick = () => document.getElementById('dlg').close();
+    document.getElementById('pform').onsubmit = saveProduct;
+    loadProducts();
+  }
+
+  // ===== 商品 =====
+  async function loadProducts() {
+    products = await api('/api/admin/products');
+    document.getElementById('product-table').innerHTML = `
+      <tr><th>圖</th><th>代碼</th><th>名稱</th><th>花種</th><th>單價</th><th>庫存</th><th>狀態</th><th></th></tr>
+      ${products.map(p => `
+        <tr>
+          <td>${imgTag(p.mainImageUrl, p.name)}</td>
+          <td>${esc(p.productCode)}</td>
+          <td>${esc(p.name)}</td>
+          <td>${esc(p.flowerType)}</td>
+          <td>${money(p.basePrice)}</td>
+          <td>${p.stock}</td>
+          <td>${p.status === 1 ? '<span class="status COMPLETED">上架</span>' : '<span class="status PENDING">下架</span>'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn small outline" onclick="openDialog(${p.id})">編輯</button>
+            <button class="btn small outline" onclick="toggleStatus(${p.id})">${p.status === 1 ? '下架' : '上架'}</button>
+          </td>
+        </tr>`).join('')}`;
+  }
+
+  function openDialog(id) {
+    editingId = id;
+    const form = document.getElementById('pform');
+    form.reset();
+    document.getElementById('dlg-title').textContent = id ? '編輯商品' : '新增商品';
+    if (id) {
+      const p = products.find(x => x.id === id);
+      Object.entries({ ...p, occasions: p.occasions.join(',') }).forEach(([k, v]) => {
+        if (form.elements[k]) form.elements[k].value = v ?? '';
+      });
+    }
+    document.getElementById('dlg').showModal();
+  }
+
+  function formBody(form) {
+    const f = form.elements;
+    return {
+      productCode: f.productCode.value.trim(),
+      name: f.name.value,
+      flowerType: f.flowerType.value,
+      occasions: f.occasions.value,
+      basePrice: f.basePrice.value,
+      stock: parseInt(f.stock.value),
+      flowerMeaning: f.flowerMeaning.value,
+      careInstructions: f.careInstructions.value,
+      status: parseInt(f.status.value),
+    };
+  }
+
+  async function saveProduct(e) {
+    e.preventDefault();
+    try {
+      const body = formBody(e.target);
+      if (editingId) await api('/api/admin/products/' + editingId, { method: 'PUT', body });
+      else await api('/api/admin/products', { method: 'POST', body });
+      document.getElementById('dlg').close();
+      toast('已儲存');
+      loadProducts();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  async function toggleStatus(id) {
+    const p = products.find(x => x.id === id);
+    const body = {
+      productCode: p.productCode, name: p.name, flowerType: p.flowerType, occasions: p.occasions.join(','),
+      basePrice: p.basePrice, stock: p.stock, flowerMeaning: p.flowerMeaning, careInstructions: p.careInstructions,
+      status: p.status === 1 ? 0 : 1,
+    };
+    try {
+      await api('/api/admin/products/' + id, { method: 'PUT', body });
+      loadProducts();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  // ===== 訂單 =====
+  async function loadOrders() {
+    const status = document.getElementById('status-filter').value;
+    const orders = await api('/api/admin/orders' + (status ? '?status=' + status : ''));
+    const box = document.getElementById('order-list');
+    box.innerHTML = orders.length ? orders.map(o => `
+      <div class="order">
+        <div class="order-head">
+          <div><strong>#${esc(o.orderNo)}</strong> <span class="hint">會員 ${esc(o.username)}・${esc(o.createdAt)}</span></div>
+          <div>
+            <span class="status ${o.status}">${esc(o.statusLabel)}</span>
+            ${NEXT[o.status] ? `<button class="btn small" onclick="advance(${o.id}, '${NEXT[o.status][0]}')">${NEXT[o.status][1]}</button>` : ''}
+            <button class="btn small outline" onclick="deleteOrder(${o.id}, '${esc(o.orderNo)}', '${o.status}')">刪除</button>
+          </div>
+        </div>
+        <div class="order-grid">
+          <div>收件人：${esc(o.recipientName)}（${esc(o.recipientPhone)}）</div>
+          <div>指定送達：<strong>${esc(o.deliveryDate)} ${esc(o.deliveryTimeSlot)}</strong></div>
+          <div style="grid-column:1/-1">地址：${esc(o.shippingAddress)}</div>
+        </div>
+        <div style="margin-top:8px">
+          ${o.items.map(i => `
+            <div class="summary-row"><span>${esc(i.productName)} × ${i.quantity}・${esc(i.wrappingLabel)}・單價 ${money(i.price)}</span><span>${money(i.subtotal)}</span></div>
+            ${i.cardMessage ? `<div class="card-note">${cardText(i.cardMessage, i.cardSignature, i.anonymous)}</div>` : ''}`).join('')}
+          <div class="summary-row total"><span>合計</span><span>${money(o.totalAmount)}</span></div>
+        </div>
+      </div>`).join('') : '<div class="empty">沒有訂單</div>';
+  }
+
+  async function advance(id, status) {
+    try {
+      await api(`/api/admin/orders/${id}/status`, { method: 'PUT', body: { status } });
+      toast('已更新配送狀態');
+      loadOrders();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  async function deleteOrder(id, orderNo, status) {
+    // 尚未出貨的訂單會加回庫存，已出貨的不會
+    const stockNote = (status === 'PENDING' || status === 'PAID')
+      ? '尚未出貨，刪除後庫存會加回去。'
+      : '已出貨，刪除後庫存不會加回。';
+    if (!confirm(`確定要刪除訂單 #${orderNo}？\n${stockNote}\n刪除後無法復原。`)) return;
+    try {
+      await api(`/api/admin/orders/${id}`, { method: 'DELETE' });
+      toast('已刪除訂單');
+      loadOrders();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  init().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

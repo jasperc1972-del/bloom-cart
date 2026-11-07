@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>我的訂單｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <h2 class="page-title">我的訂單</h2>
+  <div id="root"></div>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  /** 訂單卡片（admin.html 也用同樣結構） */
+  function orderHtml(o) {
+    return `
+      <div class="order">
+        <div class="order-head">
+          <div><strong>#${esc(o.orderNo)}</strong> <span class="hint">${esc(o.createdAt)}</span></div>
+          <div>
+            <span class="status ${o.status}">${esc(o.statusLabel)}</span>
+            ${o.status === 'PENDING'
+              ? `<button class="btn small outline" onclick="cancelOrder('${esc(o.orderNo)}')">取消訂單</button>` : ''}
+          </div>
+        </div>
+        <div class="order-grid">
+          <div>收件人：${esc(o.recipientName)}（${esc(o.recipientPhone)}）</div>
+          <div>送達：<strong>${esc(o.deliveryDate)} ${esc(o.deliveryTimeSlot)}</strong></div>
+          <div style="grid-column:1/-1">地址：${esc(o.shippingAddress)}</div>
+        </div>
+        <div style="margin-top:10px">
+          ${o.items.map(i => `
+            <div class="summary-row"><span>${esc(i.productName)} × ${i.quantity}・${esc(i.wrappingLabel)}</span><span>${money(i.subtotal)}</span></div>
+            ${i.cardMessage ? `<div class="card-note">${cardText(i.cardMessage, i.cardSignature, i.anonymous)}</div>` : ''}`).join('')}
+          <div class="summary-row total"><span>合計</span><span>${money(o.totalAmount)}</span></div>
+        </div>
+      </div>`;
+  }
+
+  async function cancelOrder(orderNo) {
+    if (!confirm(`確定要取消訂單 #${orderNo}？\n取消後訂單會刪除，無法復原。`)) return;
+    try {
+      await api('/api/orders/' + encodeURIComponent(orderNo), { method: 'DELETE' });
+      toast('已取消訂單');
+      loadOrders();
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
+  async function loadOrders() {
+    const orders = await api('/api/orders');
+    document.getElementById('root').innerHTML = orders.length
+      ? orders.map(orderHtml).join('')
+      : '<div class="empty">還沒有訂單喔 🌷<br><br><a class="btn" href="/index.html">去逛逛</a></div>';
+  }
+
+  async function init() {
+    const me = await renderLayout('orders');
+    if (!requireLogin(me)) return;
+    await loadOrders();
+  }
+
+  init().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

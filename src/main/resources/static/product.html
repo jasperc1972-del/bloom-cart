@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>花卉詳情｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <p><a href="/index.html">← 回花卉目錄</a></p>
+  <div id="root"></div>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  let product, meta;
+
+  async function init() {
+    await renderLayout('home');
+    const id = qs('id');
+    [product, meta] = await Promise.all([api('/api/products/' + encodeURIComponent(id)), api('/api/meta')]);
+    document.title = product.name + '｜朵拉花店';
+    render();
+  }
+
+  function render() {
+    const p = product;
+    const images = [p.mainImageUrl, ...p.detailImageUrls];
+    const soldOut = p.stock <= 0;
+    document.getElementById('root').innerHTML = `
+      <div class="detail">
+        <div class="gallery">
+          ${imgTag(images[0], p.name, 'main-img')}
+          ${images.length > 1 ? `<div class="thumbs">${images.map((src, i) =>
+            imgTag(src, p.name + ' 細節圖 ' + i, i === 0 ? 'active' : '')).join('')}</div>` : ''}
+        </div>
+        <div class="info">
+          <h1>${esc(p.name)}</h1>
+          <div class="tags">${p.occasions.map(o => `<span class="tag">${esc(o)}</span>`).join('')}</div>
+          <div class="price">${money(p.basePrice)}</div>
+
+          <div class="info-block"><h3>🌸 花種</h3><p>${esc(p.flowerType)}</p></div>
+          <div class="info-block"><h3>💬 花語</h3><p>${esc(p.flowerMeaning)}</p></div>
+          <div class="info-block"><h3>🪴 照顧注意事項</h3><p>${esc(p.careInstructions)}</p></div>
+
+          <form id="form" class="panel">
+            <div class="field">
+              <label>包裝風格</label>
+              <div class="radio-group">
+                ${meta.wrappingOptions.map((w, i) => `
+                  <label class="radio-card">
+                    <input type="radio" name="wrapping" value="${w.code}" ${i === 0 ? 'checked' : ''}>
+                    ${esc(w.label)} <span class="hint">${Number(w.fee) > 0 ? '+' + money(w.fee) : '免費'}</span>
+                  </label>`).join('')}
+              </div>
+            </div>
+            <div class="field inline">
+              <label for="qty">數量</label>
+              <input type="number" id="qty" min="1" max="${Math.min(99, p.stock)}" value="1" ${soldOut ? 'disabled' : ''}>
+              <span class="hint">庫存 ${p.stock} 件</span>
+            </div>
+            <div class="field">
+              <label for="msg">卡片附言 <span class="hint" id="msg-count">0 / ${meta.cardMessageLimit}</span></label>
+              <textarea id="msg" maxlength="${meta.cardMessageLimit}" placeholder="寫下想說的話（可留白）"></textarea>
+            </div>
+            <div class="field inline">
+              <label><input type="checkbox" id="anon"> 匿名送花</label>
+              <input type="text" id="sig" maxlength="50" placeholder="署名，例如：愛你的小明" style="flex:1">
+            </div>
+            <div class="price-preview" id="preview"></div>
+            <button class="btn block" ${soldOut ? 'disabled' : ''}>${soldOut ? '已售完' : '加入購物車'}</button>
+          </form>
+        </div>
+      </div>`;
+    bind();
+  }
+
+  function bind() {
+    const $ = id => document.getElementById(id);
+    const form = $('form');
+
+    // 細節圖切換
+    const thumbs = document.querySelector('.thumbs');
+    if (thumbs) {
+      thumbs.onclick = e => {
+        if (e.target.tagName !== 'IMG') return;
+        document.querySelector('.main-img').src = e.target.src;
+        thumbs.querySelectorAll('img').forEach(i => i.classList.toggle('active', i === e.target));
+      };
+    }
+
+    // 單項總價 = (花卉基礎單價 + 包裝加價) × 數量
+    const updatePreview = () => {
+      const w = meta.wrappingOptions.find(x => x.code === form.wrapping.value);
+      const qty = Math.max(1, parseInt($('qty').value) || 1);
+      const total = (Number(product.basePrice) + Number(w.fee)) * qty;
+      $('preview').innerHTML = `(${money(product.basePrice)} + 包裝 ${money(w.fee)}) × ${qty} = <strong>${money(total)}</strong>`;
+    };
+    form.addEventListener('input', updatePreview);
+    updatePreview();
+
+    $('msg').oninput = e => { $('msg-count').textContent = `${[...e.target.value].length} / ${meta.cardMessageLimit}`; };
+    $('anon').onchange = e => { $('sig').disabled = e.target.checked; if (e.target.checked) $('sig').value = ''; };
+
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const btn = form.querySelector('button');
+      btn.disabled = true;
+      try {
+        const cart = await api('/api/cart/add', {
+          method: 'POST',
+          body: {
+            productId: product.id,
+            quantity: parseInt($('qty').value),
+            wrappingOption: form.wrapping.value,
+            cardMessage: $('msg').value,
+            cardSignature: $('sig').value,
+            anonymous: $('anon').checked,
+          },
+        });
+        refreshCartBadge(cart);
+        toast('已加入購物車 🌷');
+      } catch (err) {
+        toast(err.message, true);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+  }
+
+  init().catch(e => {
+    document.getElementById('root').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  });
+</script>
+</body>
+</html>

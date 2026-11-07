@@ -1,0 +1,41 @@
+# 注意：埠號、資料庫連線、帳號密碼都不寫在這裡（這個檔案會上傳 GitHub）
+# 請複製專案根目錄的 application-example.yml 為 config/application.yml 後填入
+
+server:
+  servlet:
+    session:
+      timeout: 2h
+    encoding:
+      charset: UTF-8
+      force: true
+
+spring:
+  application:
+    name: dora-floral
+  threads:
+    virtual:
+      enabled: true          # Java 21 Virtual Threads，強化併發處理
+  datasource:
+    # url / username / password 放在 config/application.yml（不上傳）
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      mode: always           # 每次啟動執行建表（IF NOT EXISTS）與種子資料（INSERT IGNORE）
+      schema-locations: classpath:db/schema.sql
+      data-locations: classpath:db/data.sql
+      encoding: UTF-8
+  jackson:
+    time-zone: Asia/Taipei
+    date-format: yyyy-MM-dd HH:mm:ss
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+app:
+  # admin.username / admin.password 放在 config/application.yml（不上傳）
+  delivery:
+    min-days-ahead: 1        # 最快隔天送達
+    max-days-ahead: 60       # 最遠可預約 60 天後

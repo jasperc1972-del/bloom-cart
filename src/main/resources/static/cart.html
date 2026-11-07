@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>購物車｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <h2 class="page-title">我的購物車</h2>
+  <div id="root"></div>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  let meta, me, editing = null;
+
+  async function init() {
+    me = await renderLayout('cart');
+    meta = await api('/api/meta');
+    render(await api('/api/cart'));
+  }
+
+  function render(cart) {
+    refreshCartBadge(cart);
+    const root = document.getElementById('root');
+    if (!cart.items.length) {
+      root.innerHTML = `<div class="empty">購物車還是空的 🌱<br><br><a class="btn" href="/index.html">去挑選花卉</a></div>`;
+      return;
+    }
+    const allOk = cart.items.every(i => i.available);
+    root.innerHTML = `
+      <div class="layout-2col">
+        <div class="panel">${cart.items.map(itemHtml).join('')}</div>
+        <div class="panel">
+          <h3>訂單摘要</h3>
+          <div class="summary-row"><span>商品數量</span><span>${cart.totalQuantity} 件</span></div>
+          <div class="summary-row total"><span>合計</span><span>${money(cart.totalAmount)}</span></div>
+          ${allOk ? '' : '<p class="warn">有商品庫存不足或已下架，請先調整</p>'}
+          ${me ? '' : '<p class="hint">結帳前需要登入，登入後購物車會自動保留</p>'}
+          <button class="btn block" id="checkout" ${allOk ? '' : 'disabled'}>${me ? '前往結帳' : '登入並結帳'}</button>
+        </div>
+      </div>`;
+    document.getElementById('checkout').onclick = () => {
+      location.href = me ? '/checkout.html' : '/login.html?redirect=' + encodeURIComponent('/checkout.html');
+    };
+    bind(cart);
+  }
+
+  function itemHtml(i) {
+    const isEditing = editing === i.id;
+    return `
+      <div class="cart-item" data-id="${i.id}">
+        <a href="/product.html?id=${i.productId}">${imgTag(i.imageUrl, i.productName)}</a>
+        <div>
+          <a href="/product.html?id=${i.productId}"><strong>${esc(i.productName)}</strong></a>
+          <div class="meta">${money(i.basePrice)} ・ ${esc(i.wrappingLabel)}${Number(i.wrappingFee) > 0 ? '（+' + money(i.wrappingFee) + '）' : ''}</div>
+          ${i.cardMessage ? `<div class="card-note">${cardText(i.cardMessage, i.cardSignature, i.anonymous)}</div>` : ''}
+          ${i.available ? '' : `<div class="warn">庫存不足或已下架（目前庫存 ${i.stock}）</div>`}
+          <div class="controls">
+            <input type="number" class="qty" min="1" max="99" value="${i.quantity}">
+            <select class="wrap">
+              ${meta.wrappingOptions.map(w => `<option value="${w.code}" ${w.code === i.wrappingOption ? 'selected' : ''}>${esc(w.label)}</option>`).join('')}
+            </select>
+            <button class="link-btn edit-card">${isEditing ? '收起卡片' : '編輯卡片'}</button>
+            <button class="link-btn remove">移除</button>
+          </div>
+          ${isEditing ? `
+            <div class="card-editor">
+              <textarea class="msg" maxlength="${meta.cardMessageLimit}" placeholder="卡片附言（上限 ${meta.cardMessageLimit} 字）">${esc(i.cardMessage)}</textarea>
+              <div class="field inline" style="margin:8px 0 0">
+                <label><input type="checkbox" class="anon" ${i.anonymous ? 'checked' : ''}> 匿名送花</label>
+                <input type="text" class="sig" maxlength="50" placeholder="署名" value="${esc(i.cardSignature)}" ${i.anonymous ? 'disabled' : ''} style="flex:1">
+                <button class="btn small save-card">儲存</button>
+              </div>
+            </div>` : ''}
+        </div>
+        <div class="subtotal">${money(i.subtotal)}</div>
+      </div>`;
+  }
+
+  function bind(cart) {
+    document.querySelectorAll('.cart-item').forEach(row => {
+      const id = Number(row.dataset.id);
+      const item = cart.items.find(x => x.id === id);
+      const q = s => row.querySelector(s);
+
+      // 送出更新：沒有改到的欄位沿用原值
+      const save = async (overrides = {}) => {
+        const body = {
+          quantity: parseInt(q('.qty').value) || 1,
+          wrappingOption: q('.wrap').value,
+          cardMessage: item.cardMessage,
+          cardSignature: item.cardSignature,
+          anonymous: item.anonymous,
+          ...overrides,
+        };
+        try {
+          render(await api('/api/cart/items/' + id, { method: 'PUT', body }));
+        } catch (e) {
+          toast(e.message, true);
+          render(await api('/api/cart'));
+        }
+      };
+
+      q('.qty').onchange = () => save();
+      q('.wrap').onchange = () => save();
+      q('.remove').onclick = async () => render(await api('/api/cart/items/' + id, { method: 'DELETE' }));
+      q('.edit-card').onclick = () => { editing = editing === id ? null : id; render(cart); };
+      if (q('.anon')) q('.anon').onchange = e => { q('.sig').disabled = e.target.checked; };
+      if (q('.save-card')) {
+        q('.save-card').onclick = async () => {
+          editing = null;
+          await save({ cardMessage: q('.msg').value, cardSignature: q('.sig').value, anonymous: q('.anon').checked });
+          toast('卡片已更新 💌');
+        };
+      }
+    });
+  }
+
+  init().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

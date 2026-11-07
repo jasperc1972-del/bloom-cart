@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>結帳｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <h2 class="page-title">結帳</h2>
+  <div id="root"></div>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  /** 以台灣時區算出 N 天後的 yyyy-MM-dd */
+  function dateAfter(days) {
+    const d = new Date(Date.now() + days * 86400000);
+    return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+  }
+
+  async function init() {
+    const me = await renderLayout('cart');
+    if (!requireLogin(me)) return;
+    const [meta, cart] = await Promise.all([api('/api/meta'), api('/api/cart')]);
+    const root = document.getElementById('root');
+    if (!cart.items.length) {
+      root.innerHTML = `<div class="empty">購物車是空的<br><br><a class="btn" href="/index.html">去挑選花卉</a></div>`;
+      return;
+    }
+    const minDate = dateAfter(meta.deliveryMinDaysAhead);
+    const maxDate = dateAfter(meta.deliveryMaxDaysAhead);
+
+    root.innerHTML = `
+      <div class="layout-2col">
+        <form class="panel" id="form">
+          <h3>收件資訊</h3>
+          <div class="form-grid">
+            <div class="field"><label for="name">收件人姓名</label><input id="name" required maxlength="50"></div>
+            <div class="field"><label for="phone">收件人電話</label><input id="phone" required maxlength="20" placeholder="09xx-xxx-xxx"></div>
+            <div class="field full"><label for="addr">送貨地址</label><input id="addr" required maxlength="255"></div>
+          </div>
+          <h3>🌷 指定送達</h3>
+          <p class="hint">鮮花具時效性，請選擇送達日期與時段（可預約 ${minDate} ～ ${maxDate}）</p>
+          <div class="form-grid">
+            <div class="field"><label for="date">指定送達日期</label>
+              <input type="date" id="date" required min="${minDate}" max="${maxDate}" value="${minDate}"></div>
+            <div class="field"><label>指定配送時段</label>
+              <div class="radio-group">
+                ${meta.timeSlots.map((s, i) => `
+                  <label class="radio-card"><input type="radio" name="slot" value="${s}" ${i === 0 ? 'checked' : ''}> ${s}</label>`).join('')}
+              </div>
+            </div>
+          </div>
+          <button class="btn block" id="submit">確認下單 ${money(cart.totalAmount)}</button>
+        </form>
+        <div class="panel">
+          <h3>訂單內容</h3>
+          ${cart.items.map(i => `
+            <div style="margin-bottom:10px">
+              <div class="summary-row"><span>${esc(i.productName)} × ${i.quantity}</span><span>${money(i.subtotal)}</span></div>
+              <div class="hint">${esc(i.wrappingLabel)}</div>
+              ${i.cardMessage ? `<div class="card-note">${cardText(i.cardMessage, i.cardSignature, i.anonymous)}</div>` : ''}
+            </div>`).join('')}
+          <div class="summary-row total"><span>合計</span><span>${money(cart.totalAmount)}</span></div>
+          <p><a href="/cart.html">← 回購物車修改</a></p>
+        </div>
+      </div>`;
+
+    const form = document.getElementById('form');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const btn = document.getElementById('submit');
+      btn.disabled = true;
+      try {
+        const order = await api('/api/orders/checkout', {
+          method: 'POST',
+          body: {
+            // 用 getElementById 取值，避免 form.name 拿到表單本身的 name 屬性
+            recipientName: document.getElementById('name').value,
+            recipientPhone: document.getElementById('phone').value,
+            shippingAddress: document.getElementById('addr').value,
+            deliveryDate: document.getElementById('date').value,
+            deliveryTimeSlot: form.querySelector('input[name=slot]:checked').value,
+          },
+        });
+        refreshCartBadge();
+        root.innerHTML = `
+          <div class="panel" style="text-align:center;max-width:520px;margin:0 auto">
+            <h3>🎉 訂單成立！</h3>
+            <p>訂單編號 <strong>${esc(order.orderNo)}</strong></p>
+            <p>將於 <strong>${esc(order.deliveryDate)} ${esc(order.deliveryTimeSlot)}</strong> 送達 ${esc(order.recipientName)}</p>
+            <p>金額 <strong>${money(order.totalAmount)}</strong></p>
+            <p><a class="btn" href="/orders.html">查看我的訂單</a></p>
+          </div>`;
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+      }
+    };
+  }
+
+  init().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

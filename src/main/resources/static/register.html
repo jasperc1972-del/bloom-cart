@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>註冊｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <form class="panel auth-box" id="form">
+    <h3>加入會員</h3>
+    <div class="field"><label for="username">帳號 <span class="hint">4~50 個英數字或底線</span></label>
+      <input id="username" required pattern="[A-Za-z0-9_]{4,50}" autocomplete="username"></div>
+    <div class="field"><label for="password">密碼 <span class="hint">至少 8 字</span></label>
+      <input id="password" type="password" required minlength="8" maxlength="64" autocomplete="new-password"></div>
+    <div class="field"><label for="email">電子郵件 <span class="hint">選填</span></label>
+      <input id="email" type="email" maxlength="100"></div>
+    <button class="btn block">註冊並登入</button>
+    <p>已經是會員？<a href="/login.html">登入</a></p>
+  </form>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  const raw = qs('redirect') || '/index.html';
+  const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/index.html';
+
+  renderLayout('login');
+  document.getElementById('form').onsubmit = async e => {
+    e.preventDefault();
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    try {
+      await api('/api/auth/register', {
+        method: 'POST',
+        body: { username, password, email: document.getElementById('email').value || null },
+      });
+      // 註冊完直接登入（同時合併訪客購物車）
+      await api('/api/auth/login', { method: 'POST', body: { username, password } });
+      location.href = redirect;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+</script>
+</body>
+</html>

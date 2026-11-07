@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>朵拉花店 Dora Floral</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<section class="hero">
+  <div class="container">
+    <h1>每一朵花，都是想說的話</h1>
+    <p>依花語與場合挑選，附上手寫卡片，指定日期時段準時送達。</p>
+  </div>
+</section>
+
+<main class="container">
+  <div class="filters">
+    <input type="search" id="keyword" placeholder="搜尋品名、花種或花語，例如：愛、感恩、玫瑰">
+    <select id="flowerType"><option value="">全部花種</option></select>
+  </div>
+  <div class="chips" id="occasions" style="margin-bottom:20px"></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" style="display:none">找不到符合條件的花卉，換個關鍵字試試 🌱</div>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  // 篩選狀態
+  const state = { keyword: '', occasion: '', flowerType: '' };
+
+  async function loadFilters() {
+    const f = await api('/api/products/filters');
+    const sel = document.getElementById('flowerType');
+    f.flowerTypes.forEach(t => sel.insertAdjacentHTML('beforeend', `<option>${esc(t)}</option>`));
+    const chips = document.getElementById('occasions');
+    const all = ['', ...f.occasions];
+    chips.innerHTML = all.map(o =>
+      `<button class="chip ${o === '' ? 'active' : ''}" data-o="${esc(o)}">${o ? esc(o) : '全部場合'}</button>`).join('');
+    chips.onclick = e => {
+      const b = e.target.closest('.chip');
+      if (!b) return;
+      chips.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      b.classList.add('active');
+      state.occasion = b.dataset.o;
+      loadProducts();
+    };
+  }
+
+  async function loadProducts() {
+    const p = new URLSearchParams();
+    Object.entries(state).forEach(([k, v]) => v && p.set(k, v));
+    const list = await api('/api/products?' + p);
+    document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+    document.getElementById('grid').innerHTML = list.map(x => `
+      <div class="card">
+        <a href="/product.html?id=${x.id}">${imgTag(x.mainImageUrl, x.name, 'thumb')}</a>
+        <div class="body">
+          <a class="name" href="/product.html?id=${x.id}">${esc(x.name)}</a>
+          <div class="tags">${x.occasions.map(o => `<span class="tag">${esc(o)}</span>`).join('')}</div>
+          <div class="meaning">${esc(x.flowerMeaning)}</div>
+          <div class="price">${money(x.basePrice)}</div>
+          ${x.stock <= 0 ? '<div class="soldout">已售完</div>' : ''}
+        </div>
+      </div>`).join('');
+  }
+
+  // 關鍵字輸入防抖
+  let timer;
+  document.getElementById('keyword').oninput = e => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { state.keyword = e.target.value.trim(); loadProducts(); }, 300);
+  };
+  document.getElementById('flowerType').onchange = e => { state.flowerType = e.target.value; loadProducts(); };
+
+  renderLayout('home');
+  loadFilters().catch(e => toast(e.message, true));
+  loadProducts().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

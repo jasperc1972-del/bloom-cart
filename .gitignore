@@ -1,0 +1,9 @@
+target/
+.idea/
+*.iml
+.vscode/
+*.log
+.env
+application-local.yml
+# 本機私密設定（資料庫密碼等）；開頭 / 代表只排除根目錄，不影響 src/.../config/ 程式套件
+/config/

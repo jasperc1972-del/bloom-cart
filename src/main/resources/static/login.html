@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登入｜朵拉花店</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="container">
+  <form class="panel auth-box" id="form">
+    <h3>會員登入</h3>
+    <div class="field"><label for="username">帳號</label><input id="username" required autocomplete="username"></div>
+    <div class="field"><label for="password">密碼</label><input id="password" type="password" required autocomplete="current-password"></div>
+    <button class="btn block">登入</button>
+    <p class="hint">登入後，訪客時加入的購物車會自動合併到會員購物車。</p>
+    <p>還不是會員？<a id="reg-link" href="/register.html">立即註冊</a></p>
+  </form>
+</main>
+
+<script src="/js/common.js"></script>
+<script>
+  // 只允許站內相對路徑，避免開放式重導
+  const raw = qs('redirect') || '/index.html';
+  const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/index.html';
+  document.getElementById('reg-link').href = '/register.html?redirect=' + encodeURIComponent(redirect);
+
+  renderLayout('login');
+  document.getElementById('form').onsubmit = async e => {
+    e.preventDefault();
+    try {
+      await api('/api/auth/login', {
+        method: 'POST',
+        body: { username: document.getElementById('username').value, password: document.getElementById('password').value },
+      });
+      location.href = redirect;
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
+</script>
+</body>
+</html>
