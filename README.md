@@ -1,6 +1,9 @@
 # 朵拉花店 Dora Floral
 
-🎬 **展示影片**：https://www.youtube.com/watch?v=dhz7wtV6JHY
+🎬 **展示影片**
+
+- 最新：https://www.youtube.com/watch?v=StpHBfucj7Y
+- 初版：https://www.youtube.com/watch?v=dhz7wtV6JHY
 
 花卉購物車網站，依《朵拉花店購物車網站 PRD》實作。
 
@@ -181,6 +184,39 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 - 用 `config/application.yml` 設定的管理員帳號登入後，頁首會出現「管理後台」
 - 「粉芍藥典雅花束」刻意沒有圖檔，用來展示 placeholder 容錯
+
+## 單元測試（JUnit 5）
+
+共 **82 個測試**，使用 JUnit 5 + Mockito + AssertJ（`spring-boot-starter-test` 內建，不需額外套件）。
+Mapper 全部以 Mockito 模擬，**執行測試不需要 MySQL，也不會動到任何資料**。
+
+```powershell
+mvn test
+```
+
+看到 `Tests run: 82, Failures: 0` 與 `BUILD SUCCESS` 即全部通過。
+（過程中會出現一段 `ERROR ... DB password wrong` 的紀錄，那是測試「系統錯誤不洩漏內部訊息」時故意製造的例外，屬正常現象。）
+
+### 測試檔案一覽
+
+測試位於 `src/test/java/com/dora/flowerstore/`，每個測試都以 `@DisplayName` 標註中文說明。
+
+| 測試類別 | 數量 | 驗證重點 |
+|---|---|---|
+| `service/impl/CartServiceImplTest` | 19 | 訪客 / 會員購物車、相同選項合併數量、庫存上限、卡片附言 100 字上限、匿名不留署名、單項小計與總額、不可修改他人項目、登入合併時超量自動調降至庫存 |
+| `service/impl/OrderServiceImplTest` | 19 | 結帳金額（含包裝加價）、依商品 id 排序扣庫存、庫存不足回 409 且不建立訂單、配送日期範圍與邊界值、配送時段、明細價格快照、訂單狀態只能往後推進、取消 / 刪除時是否加回庫存 |
+| `controller/ApiControllerTest` | 15 | 登入攔截器（未登入 401、非管理員 403）、`@Valid` 欄位驗證訊息、JSON 格式錯誤、業務例外狀態碼、未預期錯誤不洩漏內部訊息 |
+| `enums/EnumsTest` | 10 | 包裝選項與加價、訂單狀態順序、配送時段 |
+| `service/impl/ProductServiceImplTest` | 8 | 下架商品 404、場合格式正規化（全形逗號、頓號、重複）、篩選選項、商品代碼重複、改代碼時主圖路徑同步 |
+| `service/ProductImageServiceTest` | 6 | 缺圖回 placeholder、細節圖遇缺號即停、拒絕外部網址與路徑穿越、存在檢查快取 |
+| `support/MybatisPlusTestSupport` | — | 共用工具：不啟動 Spring 時手動初始化 MyBatis-Plus 的 Entity 欄位對應，讓 `LambdaQueryWrapper` 可在單元測試中使用 |
+
+### 測試設計說明
+
+- **Service 層**：以 `@Mock` 模擬 Mapper，專注驗證業務規則；用 `ArgumentCaptor` 檢查寫入資料庫的內容、`InOrder` 檢查扣庫存與刪除的先後順序。
+- **Controller 層**：以 standalone `MockMvc` 組裝 Controller + `AuthInterceptor` + `GlobalExceptionHandler`，不載入完整 Spring Context。
+- **參數化測試**：日期邊界、狀態倒退等情境用 `@ParameterizedTest` + `@CsvSource` 一次涵蓋多組輸入。
+- **驗證測試有效**：曾刻意把結帳金額中的包裝加價移除，測試立即失敗（預期 4940、實際 4640），確認測試能抓到計算錯誤。
 
 ## API 一覽
 
