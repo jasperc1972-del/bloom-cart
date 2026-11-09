@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 - 關閉黑色視窗即停止網站
 
 - 用 `config/application.yml` 設定的管理員帳號登入後，頁首會出現「管理後台」
-- 「粉芍藥典雅花束」刻意沒有圖檔，用來展示 placeholder 容錯
+- 商品沒有圖檔時會自動顯示 `placeholder_flower.webp`（placeholder 容錯）
 
 ## 單元測試（JUnit 5）
 
@@ -237,7 +237,8 @@ mvn test
 
 放在 `src/main/resources/static/images/products/{product_code}/`：
 
-- `main.webp`：主圖，1:1、800x800
-- `detail_1.webp`、`detail_2.webp`…：細節圖，依序編號
+- `main.webp`：主圖，建議 1:1 正方形、最長邊 800px 左右
+- `detail_1.webp`、`detail_2.webp`…：細節圖，依序編號（遇到缺號就不再往下找）
+- 只認 `.webp` 格式；換圖後需重新 `mvn package`（圖片會打包進 jar），瀏覽器按 `Ctrl + F5` 重新整理
 
-目前的圖是 `tools/generate_images.py` 畫的示範插圖，上線前請換成實拍照片。
+目前 9 款商品的主圖與紅玫瑰細節圖 1 已換成花卉照片，其餘細節圖仍是 `tools/generate_images.py` 畫的示範插圖。
