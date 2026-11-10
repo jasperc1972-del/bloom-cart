@@ -4,7 +4,7 @@
 
 - 最新：https://youtu.be/btPZnIv2l9g （多收件人下單、付款人、通知信與送達流程）
 - 上一版：https://www.youtube.com/watch?v=StpHBfucj7Y
-- 初版：https://www.youtube.com/watch?v=dhz7wtV6JHY
+
 
 花卉購物車網站，依《朵拉花店購物車網站 PRD》實作。
 
