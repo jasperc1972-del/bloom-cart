@@ -45,11 +45,15 @@ CREATE TABLE IF NOT EXISTS cart_items (
 CREATE TABLE IF NOT EXISTS orders (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     order_no VARCHAR(64) NOT NULL UNIQUE,
+    batch_no VARCHAR(64),                                 -- 補充：結帳批號，同一次結帳拆出的訂單共用
     user_id BIGINT NOT NULL,
     total_amount DECIMAL(10, 2) NOT NULL,
     recipient_name VARCHAR(50) NOT NULL,
     recipient_phone VARCHAR(20) NOT NULL,
     shipping_address VARCHAR(255) NOT NULL,
+    payer_name VARCHAR(50),                               -- 補充：付款人姓名
+    payer_phone VARCHAR(20),                              -- 補充：付款人電話
+    payer_email VARCHAR(100),                             -- 補充：付款通知信寄送對象
     delivery_date DATE NOT NULL,
     delivery_time_slot VARCHAR(30),
     card_message VARCHAR(255),                            -- 整筆訂單卡片快照（各品項卡片彙整）

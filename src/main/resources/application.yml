@@ -12,6 +12,9 @@ server:
 spring:
   application:
     name: dora-floral
+  config:
+    # 寄信帳密與匯款帳號放在 config/mail.yml（不上傳）；沒有這個檔案就不寄信
+    import: optional:file:./config/mail.yml
   threads:
     virtual:
       enabled: true          # Java 21 Virtual Threads，強化併發處理

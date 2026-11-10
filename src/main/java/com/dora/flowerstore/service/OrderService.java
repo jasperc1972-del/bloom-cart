@@ -7,8 +7,8 @@ import java.util.List;
 
 public interface OrderService {
 
-    /** 結帳：寫入訂單、扣庫存、清空購物車，全部在同一個交易內 */
-    OrderView checkout(Long userId, CheckoutRequest request);
+    /** 結帳：依收件人拆成多張訂單、扣庫存、清空購物車，全部在同一個交易內 */
+    List<OrderView> checkout(Long userId, CheckoutRequest request);
 
     List<OrderView> listMyOrders(Long userId);
 

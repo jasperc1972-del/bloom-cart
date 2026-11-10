@@ -20,78 +20,191 @@
     return d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
   }
 
+  let meta, cart, minDate, maxDate;
+  /** 收件人卡片的流水號（只用來產生唯一的 radio name，不是顯示用編號） */
+  let seq = 0;
+
+  /** 一位收件人的表單區塊；付款人欄位在「同一人付款」時隱藏並 disabled（不參與必填驗證） */
+  function recipientHtml(key) {
+    return `
+      <div class="recipient" data-key="${key}">
+        <div class="recipient-head">
+          <h3 class="recipient-title"></h3>
+          <button type="button" class="btn small outline remove-recipient">移除</button>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>收件人姓名</label><input class="r-name" required maxlength="50"></div>
+          <div class="field"><label>收件人電話</label><input class="r-phone" required maxlength="20" placeholder="09xx-xxx-xxx"></div>
+          <div class="field full"><label>送貨地址</label><input class="r-addr" required maxlength="255"></div>
+          <div class="field"><label>指定送達日期</label>
+            <input type="date" class="r-date" required min="${minDate}" max="${maxDate}" value="${minDate}"></div>
+          <div class="field"><label>指定配送時段</label>
+            <div class="radio-group">
+              ${meta.timeSlots.map((s, i) => `
+                <label class="radio-card"><input type="radio" name="slot-${key}" value="${s}" ${i === 0 ? 'checked' : ''}> ${s}</label>`).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="r-payer">
+          <p class="hint">這位收件人的付款人</p>
+          <div class="form-grid">
+            <div class="field"><label>付款人姓名</label><input class="p-name" required maxlength="50"></div>
+            <div class="field"><label>付款人電話</label><input class="p-phone" required maxlength="20" placeholder="09xx-xxx-xxx"></div>
+            <div class="field full"><label>付款人 Email <span class="hint">（待付款通知寄到這裡）</span></label>
+              <input type="email" class="p-email" required maxlength="100" placeholder="name@example.com"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const recipients = () => [...document.querySelectorAll('.recipient')];
+  const samePayer = () => document.getElementById('same-payer').checked;
+  /** 收件人顯示名稱：有填姓名就用姓名 */
+  function recipientLabel(el, idx) {
+    const name = el.querySelector('.r-name').value.trim();
+    return `收件人 ${idx + 1}${name ? '：' + name : ''}`;
+  }
+
+  /** 新增收件人後、移除後、改姓名後：重新編號、更新右側下拉選單與各收件人小計 */
+  function refresh() {
+    const list = recipients();
+    const same = samePayer();
+    list.forEach((el, i) => {
+      el.querySelector('.recipient-title').textContent = `🌷 收件人 ${i + 1}`;
+      el.querySelector('.remove-recipient').hidden = list.length === 1;
+      const payer = el.querySelector('.r-payer');
+      payer.hidden = same;
+      payer.querySelectorAll('input').forEach(inp => inp.disabled = same);
+    });
+    document.getElementById('payer-shared').hidden = !same;
+    document.querySelectorAll('#payer-shared input').forEach(inp => inp.disabled = !same);
+
+    // 每項商品的「送給」下拉選單：保留原本選的收件人，被移除的就改回第 1 位
+    document.querySelectorAll('.assign').forEach(sel => {
+      const keep = sel.value;
+      sel.innerHTML = list.map((el, i) =>
+        `<option value="${el.dataset.key}">${esc(recipientLabel(el, i))}</option>`).join('');
+      sel.value = list.some(el => el.dataset.key === keep) ? keep : list[0].dataset.key;
+    });
+
+    // 各收件人小計（每位收件人是一張獨立訂單）
+    const box = document.getElementById('per-recipient');
+    box.innerHTML = list.length > 1 ? list.map((el, i) => {
+      const sum = cart.items.filter((it, idx) => document.querySelectorAll('.assign')[idx].value === el.dataset.key)
+        .reduce((a, it) => a + Number(it.subtotal), 0);
+      return `<div class="summary-row"><span class="hint">${esc(recipientLabel(el, i))}</span><span class="hint">${money(sum)}</span></div>`;
+    }).join('') + '<p class="hint">每位收件人會拆成一張訂單，分別配送</p>' : '';
+  }
+
+  function addRecipient() {
+    const key = ++seq;
+    document.getElementById('recipient-list').insertAdjacentHTML('beforeend', recipientHtml(key));
+    refresh();
+  }
+
   async function init() {
     const me = await renderLayout('cart');
     if (!requireLogin(me)) return;
-    const [meta, cart] = await Promise.all([api('/api/meta'), api('/api/cart')]);
+    [meta, cart] = await Promise.all([api('/api/meta'), api('/api/cart')]);
     const root = document.getElementById('root');
     if (!cart.items.length) {
       root.innerHTML = `<div class="empty">購物車是空的<br><br><a class="btn" href="/index.html">去挑選花卉</a></div>`;
       return;
     }
-    const minDate = dateAfter(meta.deliveryMinDaysAhead);
-    const maxDate = dateAfter(meta.deliveryMaxDaysAhead);
+    minDate = dateAfter(meta.deliveryMinDaysAhead);
+    maxDate = dateAfter(meta.deliveryMaxDaysAhead);
 
     root.innerHTML = `
       <div class="layout-2col">
         <form class="panel" id="form">
-          <h3>收件資訊</h3>
-          <div class="form-grid">
-            <div class="field"><label for="name">收件人姓名</label><input id="name" required maxlength="50"></div>
-            <div class="field"><label for="phone">收件人電話</label><input id="phone" required maxlength="20" placeholder="09xx-xxx-xxx"></div>
-            <div class="field full"><label for="addr">送貨地址</label><input id="addr" required maxlength="255"></div>
+          <h3>付款人</h3>
+          <label class="field inline"><input type="checkbox" id="same-payer" checked> 所有收件人由同一位付款人付款</label>
+          <div id="payer-shared" class="form-grid">
+            <div class="field"><label for="payer-name">付款人姓名</label><input id="payer-name" required maxlength="50" value="${esc(me.username)}"></div>
+            <div class="field"><label for="payer-phone">付款人電話</label><input id="payer-phone" required maxlength="20" placeholder="09xx-xxx-xxx"></div>
+            <div class="field full"><label for="payer-email">付款人 Email <span class="hint">（待付款通知與匯款資訊會寄到這裡）</span></label>
+              <input type="email" id="payer-email" required maxlength="100" placeholder="name@example.com" value="${esc(me.email)}"></div>
           </div>
-          <h3>🌷 指定送達</h3>
-          <p class="hint">鮮花具時效性，請選擇送達日期與時段（可預約 ${minDate} ～ ${maxDate}）</p>
-          <div class="form-grid">
-            <div class="field"><label for="date">指定送達日期</label>
-              <input type="date" id="date" required min="${minDate}" max="${maxDate}" value="${minDate}"></div>
-            <div class="field"><label>指定配送時段</label>
-              <div class="radio-group">
-                ${meta.timeSlots.map((s, i) => `
-                  <label class="radio-card"><input type="radio" name="slot" value="${s}" ${i === 0 ? 'checked' : ''}> ${s}</label>`).join('')}
-              </div>
-            </div>
-          </div>
+          <p class="hint">鮮花具時效性，請為每位收件人選擇送達日期與時段（可預約 ${minDate} ～ ${maxDate}）</p>
+          <div id="recipient-list"></div>
+          <button type="button" class="btn outline block" id="add-recipient" style="margin-bottom:14px">＋ 新增收件人（送到不同地址）</button>
           <button class="btn block" id="submit">確認下單 ${money(cart.totalAmount)}</button>
         </form>
         <div class="panel">
           <h3>訂單內容</h3>
           ${cart.items.map(i => `
-            <div style="margin-bottom:10px">
+            <div style="margin-bottom:12px">
               <div class="summary-row"><span>${esc(i.productName)} × ${i.quantity}</span><span>${money(i.subtotal)}</span></div>
               <div class="hint">${esc(i.wrappingLabel)}</div>
               ${i.cardMessage ? `<div class="card-note">${cardText(i.cardMessage, i.cardSignature, i.anonymous)}</div>` : ''}
+              <label class="field inline" style="margin:6px 0 0"><span class="hint">送給</span>
+                <select class="assign" data-cart-id="${i.id}" style="flex:1"></select></label>
             </div>`).join('')}
+          <div id="per-recipient"></div>
           <div class="summary-row total"><span>合計</span><span>${money(cart.totalAmount)}</span></div>
           <p><a href="/cart.html">← 回購物車修改</a></p>
         </div>
       </div>`;
 
     const form = document.getElementById('form');
+    addRecipient();
+    document.getElementById('add-recipient').onclick = () => {
+      if (recipients().length >= 10) return toast('一次結帳最多 10 位收件人', true);
+      addRecipient();
+    };
+    document.getElementById('same-payer').onchange = refresh;
+    document.getElementById('recipient-list').addEventListener('click', e => {
+      if (e.target.classList.contains('remove-recipient')) {
+        e.target.closest('.recipient').remove();
+        refresh();
+      }
+    });
+    // 改收件人姓名時，同步更新下拉選單上的名稱
+    document.getElementById('recipient-list').addEventListener('input', e => {
+      if (e.target.classList.contains('r-name')) refresh();
+    });
+    root.addEventListener('change', e => {
+      if (e.target.classList.contains('assign')) refresh();
+    });
+
     form.onsubmit = async e => {
       e.preventDefault();
+      const selects = [...document.querySelectorAll('.assign')];
+      const same = samePayer();
+      const shipments = recipients().map((el, i) => ({
+        recipientName: el.querySelector('.r-name').value,
+        recipientPhone: el.querySelector('.r-phone').value,
+        shippingAddress: el.querySelector('.r-addr').value,
+        deliveryDate: el.querySelector('.r-date').value,
+        deliveryTimeSlot: el.querySelector(`input[name=slot-${el.dataset.key}]:checked`).value,
+        payerName: same ? document.getElementById('payer-name').value : el.querySelector('.p-name').value,
+        payerPhone: same ? document.getElementById('payer-phone').value : el.querySelector('.p-phone').value,
+        payerEmail: same ? document.getElementById('payer-email').value : el.querySelector('.p-email').value,
+        cartItemIds: selects.filter(s => s.value === el.dataset.key).map(s => Number(s.dataset.cartId)),
+        label: recipientLabel(el, i),
+      }));
+      const empty = shipments.find(s => !s.cartItemIds.length);
+      if (empty) return toast(`${empty.label} 還沒有分配商品，請在右側「送給」選擇，或移除這位收件人`, true);
+      shipments.forEach(s => delete s.label);
+
       const btn = document.getElementById('submit');
       btn.disabled = true;
       try {
-        const order = await api('/api/orders/checkout', {
-          method: 'POST',
-          body: {
-            // 用 getElementById 取值，避免 form.name 拿到表單本身的 name 屬性
-            recipientName: document.getElementById('name').value,
-            recipientPhone: document.getElementById('phone').value,
-            shippingAddress: document.getElementById('addr').value,
-            deliveryDate: document.getElementById('date').value,
-            deliveryTimeSlot: form.querySelector('input[name=slot]:checked').value,
-          },
-        });
+        const orders = await api('/api/orders/checkout', { method: 'POST', body: { shipments } });
         refreshCartBadge();
+        const total = orders.reduce((a, o) => a + Number(o.totalAmount), 0);
         root.innerHTML = `
-          <div class="panel" style="text-align:center;max-width:520px;margin:0 auto">
-            <h3>🎉 訂單成立！</h3>
-            <p>訂單編號 <strong>${esc(order.orderNo)}</strong></p>
-            <p>將於 <strong>${esc(order.deliveryDate)} ${esc(order.deliveryTimeSlot)}</strong> 送達 ${esc(order.recipientName)}</p>
-            <p>金額 <strong>${money(order.totalAmount)}</strong></p>
+          <div class="panel" style="text-align:center;max-width:560px;margin:0 auto">
+            <h3>🎉 訂單成立！${orders.length > 1 ? `（共 ${orders.length} 張，分別配送）` : ''}</h3>
+            ${orders.map(o => `
+              <div class="order" style="text-align:left">
+                <p>訂單編號 <strong>${esc(o.orderNo)}</strong></p>
+                <p>將於 <strong>${esc(o.deliveryDate)} ${esc(o.deliveryTimeSlot)}</strong> 送達 ${esc(o.recipientName)}</p>
+                <p class="hint">${esc(o.shippingAddress)}・付款人 ${esc(o.payerName)}</p>
+                <p>金額 <strong>${money(o.totalAmount)}</strong></p>
+              </div>`).join('')}
+            ${orders.length > 1 ? `<p>總金額 <strong>${money(total)}</strong></p>` : ''}
+            <p class="hint">付款通知與匯款資訊已寄到 ${[...new Set(orders.map(o => o.payerEmail))].map(esc).join('、')}</p>
             <p><a class="btn" href="/orders.html">查看我的訂單</a></p>
           </div>`;
       } catch (err) {

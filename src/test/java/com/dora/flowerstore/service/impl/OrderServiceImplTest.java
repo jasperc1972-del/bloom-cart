@@ -4,11 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.dora.flowerstore.common.BusinessException;
 import com.dora.flowerstore.dto.CheckoutRequest;
 import com.dora.flowerstore.dto.OrderView;
+import com.dora.flowerstore.dto.ShipmentRequest;
 import com.dora.flowerstore.entity.CartItem;
 import com.dora.flowerstore.entity.Order;
 import com.dora.flowerstore.entity.OrderItem;
 import com.dora.flowerstore.entity.Product;
 import com.dora.flowerstore.entity.User;
+import com.dora.flowerstore.event.OrderDeliveredEvent;
+import com.dora.flowerstore.event.OrderPaidEvent;
+import com.dora.flowerstore.event.OrdersPlacedEvent;
 import com.dora.flowerstore.mapper.CartItemMapper;
 import com.dora.flowerstore.mapper.OrderItemMapper;
 import com.dora.flowerstore.mapper.OrderMapper;
@@ -29,6 +33,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 
 import java.math.BigDecimal;
@@ -68,11 +73,14 @@ class OrderServiceImplTest {
     ProductMapper productMapper;
     @Mock
     UserMapper userMapper;
+    @Mock
+    ApplicationEventPublisher events;
 
     OrderServiceImpl service;
 
     /** 模擬資料庫裡的訂單明細（insert 時存起來，查詢時回傳） */
     final List<OrderItem> savedItems = new ArrayList<>();
+    final List<Order> savedOrders = new ArrayList<>();
     Order savedOrder;
 
     @BeforeAll
@@ -83,20 +91,21 @@ class OrderServiceImplTest {
     @BeforeEach
     void setUp() {
         // 配送日期：最快明天，最晚 30 天後
-        service = new OrderServiceImpl(orderMapper, orderItemMapper, cartItemMapper, productMapper, userMapper, 1, 30);
+        service = new OrderServiceImpl(orderMapper, orderItemMapper, cartItemMapper, productMapper, userMapper, events, 1, 30);
 
         User u = new User();
         u.setId(USER);
         u.setUsername("dora_fan");
         when(userMapper.selectBatchIds(anyCollection())).thenReturn(List.of(u));
 
-        // insert 訂單時給 id，selectById 時回傳同一筆
+        // insert 訂單時依序給 id（500、501…），結帳後 selectList 讀回全部
         doAnswer(inv -> {
             savedOrder = inv.getArgument(0);
-            savedOrder.setId(500L);
+            savedOrder.setId(500L + savedOrders.size());
+            savedOrders.add(savedOrder);
             return 1;
         }).when(orderMapper).insert(any(Order.class));
-        when(orderMapper.selectById(500L)).thenAnswer(inv -> savedOrder);
+        when(orderMapper.selectList(any())).thenAnswer(inv -> List.copyOf(savedOrders));
 
         doAnswer(inv -> {
             savedItems.add(inv.getArgument(0));
@@ -118,7 +127,12 @@ class OrderServiceImplTest {
     }
 
     static CartItem cartItem(Long productId, int qty, String wrapping, String msg, String sig, boolean anon) {
+        return cartItem(productId, productId, qty, wrapping, msg, sig, anon);
+    }
+
+    static CartItem cartItem(Long id, Long productId, int qty, String wrapping, String msg, String sig, boolean anon) {
         CartItem c = new CartItem();
+        c.setId(id);
         c.setUserId(USER);
         c.setProductId(productId);
         c.setQuantity(qty);
@@ -129,8 +143,14 @@ class OrderServiceImplTest {
         return c;
     }
 
-    static CheckoutRequest checkoutReq(LocalDate date, String slot) {
-        return new CheckoutRequest(" 王小美 ", "0900-000-000", " 測試市測試路 1 號 ", date, slot);
+    /** 單一收件人，購物車項目 id 預設 1 */
+    static CheckoutRequest checkoutReq(LocalDate date, String slot, Long... cartIds) {
+        List<Long> ids = cartIds.length == 0 ? List.of(1L) : List.of(cartIds);
+        return new CheckoutRequest(List.of(shipment(" 王小美 ", " 測試市測試路 1 號 ", date, slot, " 陳付款 ", ids)));
+    }
+
+    static ShipmentRequest shipment(String name, String addr, LocalDate date, String slot, String payer, List<Long> ids) {
+        return new ShipmentRequest(name, "0900-000-000", addr, date, slot, payer, "0900-000-009", " Payer@Example.com ", ids);
     }
 
     static Order order(Long id, String status) {
@@ -162,7 +182,7 @@ class OrderServiceImplTest {
                     cartItem(2L, 1, "STANDARD", null, null, false),
                     cartItem(1L, 2, "FRENCH", "生日快樂", "阿華", false)));
 
-            OrderView view = service.checkout(USER, checkoutReq(TODAY.plusDays(3), "09:00-12:00"));
+            OrderView view = service.checkout(USER, checkoutReq(TODAY.plusDays(3), "09:00-12:00", 1L, 2L)).getFirst();
 
             // (1680 + 150) × 2 + 1280 × 1 = 4940
             assertThat(view.totalAmount()).isEqualByComparingTo("4940");
@@ -174,6 +194,13 @@ class OrderServiceImplTest {
             // 收件資訊去掉前後空白
             assertThat(savedOrder.getRecipientName()).isEqualTo("王小美");
             assertThat(savedOrder.getShippingAddress()).isEqualTo("測試市測試路 1 號");
+            assertThat(savedOrder.getPayerName()).isEqualTo("陳付款");
+            assertThat(savedOrder.getPayerEmail()).isEqualTo("Payer@Example.com");
+            // 發出結帳事件（交易提交後寄待付款通知）
+            ArgumentCaptor<OrdersPlacedEvent> ev = ArgumentCaptor.forClass(OrdersPlacedEvent.class);
+            verify(events).publishEvent(ev.capture());
+            assertThat(ev.getValue().orders()).hasSize(1);
+            assertThat(view.batchNo()).startsWith("B");
             // 訂單號：12 碼時間 + 4 碼流水號
             assertThat(savedOrder.getOrderNo()).matches("\\d{16}");
             // 卡片彙整
@@ -222,6 +249,7 @@ class OrderServiceImplTest {
                     });
             verify(orderMapper, never()).insert(any(Order.class));
             verify(cartItemMapper, never()).delete(any(LambdaQueryWrapper.class));
+            verify(events, never()).publishEvent(any());
         }
 
         @Test
@@ -268,6 +296,109 @@ class OrderServiceImplTest {
         }
 
         @Test
+        @DisplayName("兩位收件人 → 拆成兩張訂單：各自金額、地址、付款人，共用結帳批號")
+        void splitToTwoRecipients() {
+            when(productMapper.selectById(1L)).thenReturn(product(1L, "粉鬱金香春日花束", "1280.00", 1));
+            when(productMapper.selectById(2L)).thenReturn(product(2L, "滿天星夢幻花束", "780.00", 1));
+            when(productMapper.decreaseStock(anyLong(), anyInt())).thenReturn(1);
+            when(cartItemMapper.selectList(any())).thenReturn(List.of(
+                    cartItem(11L, 1L, 1, "STANDARD", "dear lily", "steven", false),
+                    cartItem(12L, 2L, 1, "STANDARD", "congratulations", "Daddy", false)));
+            LocalDate d1 = TODAY.plusDays(1);
+            LocalDate d2 = TODAY.plusDays(5);
+
+            List<OrderView> views = service.checkout(USER, new CheckoutRequest(List.of(
+                    shipment("Lily", "台北市 A 路 1 號", d1, "09:00-12:00", "steven", List.of(11L)),
+                    shipment("女兒", "台中市 B 路 2 號", d2, "14:00-18:00", "媽媽", List.of(12L)))));
+
+            assertThat(views).hasSize(2);
+            Order a = savedOrders.get(0);
+            Order b = savedOrders.get(1);
+            assertThat(a.getTotalAmount()).isEqualByComparingTo("1280");
+            assertThat(b.getTotalAmount()).isEqualByComparingTo("780");
+            assertThat(a.getShippingAddress()).isEqualTo("台北市 A 路 1 號");
+            assertThat(b.getDeliveryDate()).isEqualTo(d2);
+            assertThat(b.getDeliveryTimeSlot()).isEqualTo("14:00-18:00");
+            assertThat(a.getPayerName()).isEqualTo("steven");
+            assertThat(b.getPayerName()).isEqualTo("媽媽");
+            assertThat(a.getBatchNo()).isNotBlank().isEqualTo(b.getBatchNo());
+            assertThat(a.getOrderNo()).isNotEqualTo(b.getOrderNo());
+            // 卡片只彙整該張訂單自己的品項
+            assertThat(a.getCardMessage()).isEqualTo("粉鬱金香春日花束：dear lily—steven");
+            // 明細各自掛在對應的訂單底下
+            assertThat(savedItems).extracting(OrderItem::getOrderId).containsExactly(500L, 501L);
+            verify(cartItemMapper).delete(any(LambdaQueryWrapper.class));
+        }
+
+        @Test
+        @DisplayName("同一款花分給兩位收件人 → 數量合併後只扣一次庫存")
+        void sameProductTwoRecipientsMergesStock() {
+            when(productMapper.selectById(1L)).thenReturn(product(1L, "玫瑰", "100.00", 1));
+            when(productMapper.decreaseStock(anyLong(), anyInt())).thenReturn(1);
+            when(cartItemMapper.selectList(any())).thenReturn(List.of(
+                    cartItem(11L, 1L, 1, "STANDARD", null, null, false),
+                    cartItem(12L, 1L, 2, "FRENCH", null, null, false)));
+
+            service.checkout(USER, new CheckoutRequest(List.of(
+                    shipment("甲", "地址甲", TODAY.plusDays(2), "09:00-12:00", "付款人", List.of(11L)),
+                    shipment("乙", "地址乙", TODAY.plusDays(2), "09:00-12:00", "付款人", List.of(12L)))));
+
+            verify(productMapper).decreaseStock(1L, 3);
+            assertThat(savedOrders).hasSize(2);
+            // (100 + 150) × 2 = 500
+            assertThat(savedOrders.get(1).getTotalAmount()).isEqualByComparingTo("500");
+        }
+
+        @Test
+        @DisplayName("有商品沒指定收件人 → 擋下，不扣庫存")
+        void unassignedItem() {
+            when(cartItemMapper.selectList(any())).thenReturn(List.of(
+                    cartItem(11L, 1L, 1, null, null, null, false),
+                    cartItem(12L, 2L, 1, null, null, null, false)));
+
+            assertThatThrownBy(() -> service.checkout(USER, checkoutReq(TODAY.plusDays(2), "09:00-12:00", 11L)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("沒有指定收件人");
+            verify(productMapper, never()).decreaseStock(anyLong(), anyInt());
+            verify(orderMapper, never()).insert(any(Order.class));
+        }
+
+        @Test
+        @DisplayName("同一項商品分給兩位收件人 → 擋下")
+        void duplicateAssignment() {
+            when(cartItemMapper.selectList(any())).thenReturn(List.of(cartItem(11L, 1L, 1, null, null, null, false)));
+
+            assertThatThrownBy(() -> service.checkout(USER, new CheckoutRequest(List.of(
+                    shipment("甲", "地址甲", TODAY.plusDays(2), "09:00-12:00", "付款人", List.of(11L)),
+                    shipment("乙", "地址乙", TODAY.plusDays(2), "09:00-12:00", "付款人", List.of(11L))))))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("不能同時分給兩位收件人");
+            verify(productMapper, never()).decreaseStock(anyLong(), anyInt());
+        }
+
+        @Test
+        @DisplayName("送來不屬於自己購物車的項目 id → 擋下")
+        void foreignCartItem() {
+            when(cartItemMapper.selectList(any())).thenReturn(List.of(cartItem(11L, 1L, 1, null, null, null, false)));
+
+            assertThatThrownBy(() -> service.checkout(USER, checkoutReq(TODAY.plusDays(2), "09:00-12:00", 11L, 999L)))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("購物車內容已變更");
+            verify(orderMapper, never()).insert(any(Order.class));
+        }
+
+        @Test
+        @DisplayName("其中一位收件人的日期不合法 → 整筆擋下")
+        void oneShipmentBadDate() {
+            assertThatThrownBy(() -> service.checkout(USER, new CheckoutRequest(List.of(
+                    shipment("甲", "地址甲", TODAY.plusDays(2), "09:00-12:00", "付款人", List.of(11L)),
+                    shipment("乙", "地址乙", TODAY.plusDays(99), "09:00-12:00", "付款人", List.of(12L))))))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("指定送達日期");
+            verify(cartItemMapper, never()).selectList(any());
+        }
+
+        @Test
         @DisplayName("配送時段不合法 → 擋下")
         void badSlot() {
             assertThatThrownBy(() -> service.checkout(USER, checkoutReq(TODAY.plusDays(2), "20:00-22:00")))
@@ -292,6 +423,29 @@ class OrderServiceImplTest {
 
             assertThat(v.status()).isEqualTo("PAID");
             verify(orderMapper).updateById(o);
+            // 改成已付款 → 發出收款確認事件
+            verify(events).publishEvent(any(OrderPaidEvent.class));
+        }
+
+        @Test
+        @DisplayName("改成已送達 → 發出送達通知事件")
+        void completedPublishesDeliveredEvent() {
+            when(orderMapper.selectById(1L)).thenReturn(order(1L, "DELIVERING"));
+
+            service.updateStatus(1L, "COMPLETED");
+
+            verify(events).publishEvent(any(OrderDeliveredEvent.class));
+            verify(events, never()).publishEvent(any(OrderPaidEvent.class));
+        }
+
+        @Test
+        @DisplayName("改成配送中 → 不發收款確認事件")
+        void deliveringNoPaidEvent() {
+            when(orderMapper.selectById(1L)).thenReturn(order(1L, "PAID"));
+
+            service.updateStatus(1L, "DELIVERING");
+
+            verify(events, never()).publishEvent(any());
         }
 
         @ParameterizedTest(name = "{0} → {1} 不允許")

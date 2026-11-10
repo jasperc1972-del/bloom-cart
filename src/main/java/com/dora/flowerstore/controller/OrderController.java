@@ -30,8 +30,8 @@ public class OrderController {
     }
 
     @PostMapping("/checkout")
-    public ApiResponse<OrderView> checkout(@RequestAttribute("userId") Long userId,
-                                           @Valid @RequestBody CheckoutRequest request) {
+    public ApiResponse<List<OrderView>> checkout(@RequestAttribute("userId") Long userId,
+                                                 @Valid @RequestBody CheckoutRequest request) {
         return ApiResponse.ok("訂單成立！朵拉花店會準時為您送達", orderService.checkout(userId, request));
     }
 

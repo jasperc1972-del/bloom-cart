@@ -169,11 +169,40 @@ class ApiControllerTest {
             mvc.perform(post("/api/orders/checkout").session(login(7L, "MEMBER"))
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("""
-                                    {"recipientName":"王小美","recipientPhone":"abc",
+                                    {"shipments":[{"recipientName":"王小美","recipientPhone":"abc",
                                      "shippingAddress":"台北市","deliveryDate":"2099-01-01",
-                                     "deliveryTimeSlot":"09:00-12:00"}"""))
+                                     "deliveryTimeSlot":"09:00-12:00","payerName":"陳付款",
+                                     "payerPhone":"0900-000-009","payerEmail":"a@b.com","cartItemIds":[1]}]}"""))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.message").value(containsString("電話格式不正確")));
+                    .andExpect(jsonPath("$.message").value(containsString("收件人電話格式不正確")));
+            verifyNoInteractions(orderService);
+        }
+
+        @Test
+        @DisplayName("結帳沒填付款人、沒分配商品 → 400")
+        void missingPayerAndItems() throws Exception {
+            mvc.perform(post("/api/orders/checkout").session(login(7L, "MEMBER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"shipments":[{"recipientName":"王小美","recipientPhone":"0900-000-000",
+                                     "shippingAddress":"台北市","deliveryDate":"2099-01-01",
+                                     "deliveryTimeSlot":"09:00-12:00","payerName":"","payerPhone":"0900-000-009",
+                                     "payerEmail":"not-an-email","cartItemIds":[]}]}"""))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(containsString("付款人姓名")))
+                    .andExpect(jsonPath("$.message").value(containsString("Email 格式不正確")))
+                    .andExpect(jsonPath("$.message").value(containsString("至少要分配一項商品")));
+            verifyNoInteractions(orderService);
+        }
+
+        @Test
+        @DisplayName("結帳沒有任何收件人 → 400")
+        void noShipments() throws Exception {
+            mvc.perform(post("/api/orders/checkout").session(login(7L, "MEMBER"))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"shipments\":[]}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.message").value(containsString("至少填寫一位收件人")));
             verifyNoInteractions(orderService);
         }
 

@@ -184,6 +184,8 @@
           <div>收件人：${esc(o.recipientName)}（${esc(o.recipientPhone)}）</div>
           <div>指定送達：<strong>${esc(o.deliveryDate)} ${esc(o.deliveryTimeSlot)}</strong></div>
           <div style="grid-column:1/-1">地址：${esc(o.shippingAddress)}</div>
+          ${o.payerName ? `<div>付款人：${esc(o.payerName)}（${esc(o.payerPhone)}${o.payerEmail ? '・' + esc(o.payerEmail) : ''}）</div>` : ''}
+          ${o.batchNo ? `<div class="hint">結帳批號 ${esc(o.batchNo)}</div>` : ''}
         </div>
         <div style="margin-top:8px">
           ${o.items.map(i => `

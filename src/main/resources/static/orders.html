@@ -30,6 +30,7 @@
           <div>收件人：${esc(o.recipientName)}（${esc(o.recipientPhone)}）</div>
           <div>送達：<strong>${esc(o.deliveryDate)} ${esc(o.deliveryTimeSlot)}</strong></div>
           <div style="grid-column:1/-1">地址：${esc(o.shippingAddress)}</div>
+          ${o.payerName ? `<div style="grid-column:1/-1">付款人：${esc(o.payerName)}（${esc(o.payerPhone)}${o.payerEmail ? '・' + esc(o.payerEmail) : ''}）</div>` : ''}
         </div>
         <div style="margin-top:10px">
           ${o.items.map(i => `
@@ -53,9 +54,20 @@
 
   async function loadOrders() {
     const orders = await api('/api/orders');
+    // 同一次結帳（同 batchNo）拆出的多張訂單包成一組；舊訂單沒有 batchNo 就各自一組
+    const groups = [];
+    orders.forEach(o => {
+      const last = groups[groups.length - 1];
+      if (o.batchNo && last && last[0].batchNo === o.batchNo) last.push(o);
+      else groups.push([o]);
+    });
     document.getElementById('root').innerHTML = orders.length
-      ? orders.map(orderHtml).join('')
-      : '<div class="empty">還沒有訂單喔 🌷<br><br><a class="btn" href="/index.html">去逛逛</a></div>';
+      ? groups.map(g => g.length === 1 ? orderHtml(g[0]) : `
+          <div class="order-batch">
+            <p class="hint">同一次結帳，共 ${g.length} 位收件人・合計 ${money(g.reduce((a, o) => a + Number(o.totalAmount), 0))}</p>
+            ${g.map(orderHtml).join('')}
+          </div>`).join('')
+      :'<div class="empty">還沒有訂單喔 🌷<br><br><a class="btn" href="/index.html">去逛逛</a></div>';
   }
 
   async function init() {
